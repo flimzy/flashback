@@ -1,4 +1,4 @@
-package index_page
+package index
 
 import (
 	"github.com/gopherjs/gopherjs/js"

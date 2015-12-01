@@ -1,4 +1,4 @@
-package login_page
+package login
 
 import (
 	"github.com/gopherjs/gopherjs/js"

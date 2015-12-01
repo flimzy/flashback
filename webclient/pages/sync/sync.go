@@ -1,4 +1,4 @@
-package sync_page
+package sync
 
 import (
 	"golang.org/x/net/context"
@@ -38,9 +38,19 @@ func DoSync(ctx context.Context) {
 	state := ctx.Value("AppState").(*clientstate.State)
 	host := ctx.Value("couchhost").(string)
 	dbName := "user-" + state.CurrentUser
-	ldb := pouchdb.New(dbName)
-	rdb := pouchdb.New(host + "/" + dbName)
-	result, err := pouchdb.Replicate(rdb, ldb, pouchdb.Options{})
-	console.Log("error = %j", err)
+	user_db := pouchdb.New(host + "/" + dbName)
+	skeleton_db := pouchdb.New(host + "/user-skeleton")
+	result, err := pouchdb.Replicate(skeleton_db, user_db, pouchdb.Options{})
+	if err != nil {
+		console.Log("Skel error =  %j", err)
+		return
+	}
+	console.Log("skel result = %j", result)
+	local_db := pouchdb.New(dbName)
+	result, err = pouchdb.Replicate(user_db, local_db, pouchdb.Options{})
+	if err != nil {
+		console.Log("error = %j", err)
+		return
+	}
 	console.Log("result = %j", result)
 }

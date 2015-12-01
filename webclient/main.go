@@ -21,6 +21,7 @@ import (
 	_ "github.com/flimzy/flashback/webclient/pages/login"
 	_ "github.com/flimzy/flashback/webclient/pages/logout"
 	_ "github.com/flimzy/flashback/webclient/pages/sync"
+	_ "github.com/flimzy/flashback/webclient/pages/study"
 	_ "github.com/flimzy/flashback/webclient/pages/debug"
 )
 
