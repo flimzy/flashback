@@ -5,23 +5,20 @@
     <div data-role="page" class="ui-responsive-panel">
         <div data-role="header" data-id="header" data-position="fixed">
             <a href="#menu" data-icon="bars" data-iconpos="notext" data-lt="menu_button">Menu</a>
-            <h1>Study</h1>
+            <h1 data-lt="import_title">Import from Anki</h1>
             <div data-type="horizontal" data-role="controlgroup" class="ui-btn-right">
                 <a data-id="syncbutton" data-icon="refresh" data-role="button" data-lt="sync_button">Sync</a>
             </div>
         </div><!-- /header -->
         <div data-role="content">
-            <div id="cardframe" class="hide-until-load">
+            <h1 data-lt="import_heading">Import Anki File</h1>
+            <div class="hide-until-load">
+                <span data-lt="select_import_file_prompt">Select a file to import:</span> <input type="file" id="apkg" />
+                <a id="importnow" class="ui-btn ui-icon-recycle ui-btn-icon-left" data-lt="import_now_button">Import Now</a>
+                <textarea id="log"></textarea>
             </div>
             <div class="show-until-load" data-lt="page_loading">
                 Initializing page...
-            </div>
-        </div>
-        <div data-role="footer" class="ui-bar" data-position="fixed">
-            <div data-role="navbar">
-                <ul>
-                <li><a data-role="button" data-icon="carat-r" data-lt="show_answer_button">Show answer</a></li>
-                </ul>
             </div>
         </div>
     </div>

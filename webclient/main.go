@@ -3,29 +3,26 @@
 package main
 
 import (
+	"strconv"
+	"sync"
+
+	"github.com/flimzy/go-cordova"
+	"github.com/flimzy/jqeventrouter"
 	"github.com/gopherjs/gopherjs/js"
 	"github.com/gopherjs/jquery"
 	"honnef.co/go/js/console"
-	"sync"
 
-// 	"golang.org/x/net/context"
-
-// 	"github.com/flimzy/flashback"
-
+	"github.com/flimzy/flashback/fserve"
 	"github.com/flimzy/flashback/util"
-// 	"github.com/flimzy/flashback/clientstate"
-// 	"github.com/flimzy/flashback/state"
-	"github.com/flimzy/go-cordova"
-	"github.com/flimzy/jqeventrouter"
-	//    "github.com/flimzy/flashback/user"
-// 	"github.com/flimzy/flashback/webclient/pages"
-// 	_ "github.com/flimzy/flashback/webclient/pages/index"
-// 	_ "github.com/flimzy/flashback/webclient/pages/debug"
+
 	"github.com/flimzy/flashback/webclient/handlers/auth"
 	"github.com/flimzy/flashback/webclient/handlers/general"
+	"github.com/flimzy/flashback/webclient/handlers/import"
+	"github.com/flimzy/flashback/webclient/handlers/l10n"
 	"github.com/flimzy/flashback/webclient/handlers/login"
 	"github.com/flimzy/flashback/webclient/handlers/logout"
-	sync_handler "github.com/flimzy/flashback/webclient/handlers/sync"
+	"github.com/flimzy/flashback/webclient/handlers/study"
+	"github.com/flimzy/flashback/webclient/handlers/sync"
 )
 
 // Some spiffy shortcuts
@@ -36,22 +33,20 @@ var document *js.Object = js.Global.Get("document")
 func main() {
 	console.Log("in main()")
 
+	RouterInit()
+
 	var wg sync.WaitGroup
 
 	initjQuery(&wg)
 	initCordova(&wg)
-// 	state := clientstate.New()
-// 	api := flashback.New(jQuery("link[rel=flashback]").Get(0).Get("href").String())
-// 	ctx := context.Background()
-//	ctx = context.WithValue(ctx, "cordova", cordova)
-// 	ctx = context.WithValue(ctx, "AppState", state)
-// 	ctx = context.WithValue(ctx, "api", api)
-// 	ctx = context.WithValue(ctx, "couchhost", jQuery("link[rel=flashbackdb]").Get(0).Get("href").String())
+	fserve.Init(&wg)
 
 	// Wait for the above modules to initialize before we initialize jQuery Mobile
 	wg.Wait()
 	console.Log("Done with main()")
-	initjQueryMobile()
+	// This is what actually loads jQuery Mobile. We have to register our 'mobileinit'
+	// event handler above first, though.
+	js.Global.Call("loadjqueryMobile")
 }
 
 func initjQuery(wg *sync.WaitGroup) {
@@ -59,11 +54,14 @@ func initjQuery(wg *sync.WaitGroup) {
 	go func() {
 		defer wg.Done()
 		js.Global.Get("jQuery").Set("cors", true)
+		jQuery(js.Global).On("resize", resizeContent)
+		jQuery(js.Global).On("orentationchange", resizeContent)
+		jQuery(document).On("pagecontainertransition", resizeContent)
 	}()
 }
 
 func initCordova(wg *sync.WaitGroup) {
-	if ! cordova.IsMobile() {
+	if !cordova.IsMobile() {
 		return
 	}
 	wg.Add(1)
@@ -73,30 +71,49 @@ func initCordova(wg *sync.WaitGroup) {
 	}, false)
 }
 
-func initjQueryMobile() {
-	jQuery(document).On("mobileinit", func() {
-		console.Log("mobileinit")
-		MobileInit()
-	})
-	// This is what actually loads jQuery Mobile. We have to register our 'mobileinit'
-	// event handler above first, though.
-	js.Global.Call("postInit")
+func resizeContent() {
+	screenHt := js.Global.Get("jQuery").Get("mobile").Call("getScreenHeight").Int()
+	header := jQuery(".ui-header:visible")
+	headerHt := header.OuterHeight()
+	if header.HasClass("ui-header-fixed") {
+		headerHt = headerHt - 1
+	}
+	footer := jQuery(".ui-footer:visible")
+	footerHt := footer.OuterHeight()
+	if footer.HasClass("ui-footer-fixed") {
+		footerHt = footerHt - 1
+	}
+	jQuery(".ui-content").SetHeight(strconv.Itoa(screenHt - headerHt - footerHt))
 }
 
 func RouterInit() {
+	// mobileinit
+	jQuery(document).On("mobileinit", func() {
+		console.Log("mobileinit")
+		MobileInit()
+		l10n_handler.MobileInit()
+	})
+
 	// beforechange -- Just check auth
 	beforeChange := jqeventrouter.NullHandler()
-	jqeventrouter.Listen( "pagecontainerbeforechange", general.JQMRouteOnce(general.CleanFacebookURI(auth.CheckAuth(beforeChange))) )
+	jqeventrouter.Listen("pagecontainerbeforechange", general.JQMRouteOnce(general.CleanFacebookURI(auth.CheckAuth(beforeChange))))
 
 	// beforetransition
 	beforeTransition := jqeventrouter.NewEventMux()
-	beforeTransition.SetUriFunc( func(_ *jquery.Event, ui *js.Object) string {
-		return util.JqmTargetUri(ui)
-	})
-	beforeTransition.HandleFunc("/login.html", login.BeforeTransition)
-	beforeTransition.HandleFunc("/logout.html", logout.BeforeTransition)
-	beforeTransition.HandleFunc("/sync.html", sync_handler.BeforeTransition)
-	jqeventrouter.Listen( "pagecontainerbeforetransition", beforeTransition )
+	beforeTransition.SetUriFunc(getJqmUri)
+	beforeTransition.HandleFunc("/login.html", login_handler.BeforeTransition)
+	beforeTransition.HandleFunc("/logout.html", logout_handler.BeforeTransition)
+	beforeTransition.HandleFunc("/import.html", import_handler.BeforeTransition)
+	beforeTransition.HandleFunc("/study.html", study_handler.BeforeTransition)
+	jqeventrouter.Listen("pagecontainerbeforetransition", beforeTransition)
+
+	// beforeshow
+	beforeShow := jqeventrouter.NullHandler()
+	jqeventrouter.Listen("pagecontainerbeforeshow", l10n_handler.LocalizePage(sync_handler.SetupSyncButton(beforeShow)))
+}
+
+func getJqmUri(_ *jquery.Event, ui *js.Object) string {
+	return util.JqmTargetUri(ui)
 }
 
 // MobileInit is run after jQuery Mobile's 'mobileinit' event has fired
@@ -108,12 +125,8 @@ func MobileInit() {
 	jQMobile.Set("pushStateEnabled", false)
 	jQMobile.Get("changePage").Get("defaults").Set("changeHash", false)
 
-	DebugEvents()
-	RouterInit()
+	// 	DebugEvents()
 
-	jQuery(document).On("pagecontainerbeforechange", func(event *jquery.Event, ui *js.Object) {
-		console.Log("last beforechange event handler")
-	})
 	jQuery(document).One("pagecreate", func(event *jquery.Event) {
 		console.Log("Enhancing the panel")
 		// This should only be executed once, to initialize our "external"

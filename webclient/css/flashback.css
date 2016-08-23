@@ -23,3 +23,23 @@ ul.login li {
 @media (min-width:35em){
     .ui-panel-dismiss { display: none !important; }
 }
+
+body,
+div[role="main"] {
+    overflow: hidden;
+}
+#cardframe {
+    height: inherit;
+}
+iframe {
+    position: absolute;
+    margin: -1em;
+    padding: 0;
+    width: 100%;
+    height: inherit;
+    border: none;
+}
+
+.disabled {
+    opacity: 0.5;
+}
