@@ -38,7 +38,7 @@ clean:
 	rm -rf www bundle.js pre-bundle.js bundle.js.map flashback main.js main.js.map
 
 distclean:
-	rm -rf node_modules plugins platforms
+	rm -rf node_modules plugins platforms www
 
 npm-install: package.json
 	npm install
