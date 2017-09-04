@@ -18,6 +18,7 @@ import (
 	"github.com/FlashbackSRS/flashback/config"
 	"github.com/FlashbackSRS/flashback/fserve"
 	"github.com/FlashbackSRS/flashback/iframes"
+	"github.com/FlashbackSRS/flashback/l10n"
 	"github.com/FlashbackSRS/flashback/model"
 	"github.com/FlashbackSRS/flashback/oauth2"
 	"github.com/FlashbackSRS/flashback/util"
@@ -40,7 +41,18 @@ var document *js.Object = js.Global.Get("document")
 
 func main() {
 	log.Debug("Starting main()\n")
-	RouterInit()
+	confJSON := document.Call("getElementById", "config").Get("innerText").String()
+	conf, err := config.NewFromJSON([]byte(confJSON))
+	if err != nil {
+		panic(err)
+	}
+
+	repo, err := model.New(context.TODO(), conf.GetString("flashback_api"), conf.GetString("flashback_api"))
+	if err != nil {
+		panic(err)
+	}
+
+	fserve.Register(repo)
 
 	var wg sync.WaitGroup
 
@@ -52,6 +64,17 @@ func main() {
 
 	// Wait for the above modules to initialize before we initialize jQuery Mobile
 	wg.Wait()
+
+	// This must happen after cordova is initialized
+	langSet := l10n_handler.Init()
+
+	if e := RouterInit(conf.GetString("flashback_app"), conf.GetString("facebook_client_id"), repo, langSet); e != nil {
+		panic(e)
+	}
+
+	jQuery(document).On("mobileinit", func() {
+		MobileInit()
+	})
 
 	// This is what actually loads jQuery Mobile. We have to register our 'mobileinit'
 	// event handler above first, though, as part of RouterInit
@@ -96,32 +119,13 @@ func resizeContent() {
 	jQuery(".ui-content").SetHeight(strconv.Itoa(screenHt - headerHt - footerHt))
 }
 
-func RouterInit() {
+func RouterInit(appURL, facebookID string, repo *model.Repo, langSet *l10n.Set) error {
 	log.Debug("Initializing router\n")
-	confJSON := document.Call("getElementById", "config").Get("innerText").String()
-	conf, err := config.NewFromJSON([]byte(confJSON))
+	parsed, err := url.Parse(appURL)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	appURL, err := url.Parse(conf.GetString("flashback_app"))
-	if err != nil {
-		panic(err)
-	}
-	prefix := strings.TrimSuffix(appURL.Path, "/")
-
-	repo, err := model.New(context.TODO(), conf.GetString("flashback_api"), conf.GetString("flashback_app"))
-	if err != nil {
-		panic(err)
-	}
-
-	fserve.Register(repo)
-
-	langSet := l10n_handler.Init()
-
-	// mobileinit
-	jQuery(document).On("mobileinit", func() {
-		MobileInit()
-	})
+	prefix := strings.TrimSuffix(parsed.Path, "/")
 
 	// beforechange -- Just check auth
 	beforeChange := jqeventrouter.NullHandler()
@@ -133,7 +137,7 @@ func RouterInit() {
 	beforeTransition.SetUriFunc(getJqmUri)
 
 	providers := map[string]string{
-		"facebook": oauth2.FacebookURL(conf.GetString("facebook_client_id"), conf.GetString("flashback_app")),
+		"facebook": oauth2.FacebookURL(facebookID, appURL),
 	}
 
 	beforeTransition.HandleFunc(prefix+"/login.html", loginhandler.BeforeTransition(providers))
@@ -148,6 +152,7 @@ func RouterInit() {
 	setupSyncButton := synchandler.SetupSyncButton(repo)
 	jqeventrouter.Listen("pagecontainerbeforeshow", l10n_handler.LocalizePage(langSet, setupSyncButton(beforeShow)))
 	log.Debug("Router init complete\n")
+	return nil
 }
 
 func getJqmUri(_ *jquery.Event, ui *js.Object) string {

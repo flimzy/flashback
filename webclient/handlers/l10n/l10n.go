@@ -1,12 +1,8 @@
 package l10n_handler
 
 import (
-	"io/ioutil"
-	"net/http"
 	"net/url"
 	"sync"
-
-	"golang.org/x/text/language"
 
 	"github.com/flimzy/go-cordova"
 	"github.com/flimzy/jqeventrouter"
@@ -15,7 +11,6 @@ import (
 	"github.com/gopherjs/jquery"
 
 	"github.com/FlashbackSRS/flashback/l10n"
-	"github.com/FlashbackSRS/flashback/util"
 )
 
 var jQuery = jquery.NewJQuery
@@ -25,57 +20,40 @@ const localeAttr = "data-locale"
 
 // Init initializes the localization engine.
 func Init() *l10n.Set {
-	langs := preferredLanguages()
-	log.Debugf("PREFERRED LANGUAGES: %v\n", langs)
-	set, err := l10n.New(langs, fetchTranslations)
+	fetch := fetchTranslations
+	if cordova.IsMobile() {
+		fetch = fetchTranslationsCordova
+	}
+	set, err := l10n.New(preferredLanguages, fetch)
 	if err != nil {
 		panic(err)
 	}
 	return set
 }
 
-func preferredLanguages() []language.Tag {
-	var langs []language.Tag
-	//	langs = append(langs, language.MustParse("es_MX"))
+func preferredLanguages() ([]string, error) {
+	var langs []string
+	nav := js.Global.Get("navigator")
 	if cordova.IsMobile() {
 		var wg sync.WaitGroup
 		wg.Add(1)
-		nav := js.Global.Get("navigator")
 		nav.Get("globalization").Call("getPreferredLanguage",
-			func(l string) {
-				defer wg.Done()
-				if tag, err := language.Parse(l); err == nil {
-					langs = append(langs, tag)
-				}
-			}, func() {
-				defer wg.Done()
+			func(l *js.Object) {
+				langs = append(langs, l.Get("value").String())
+				wg.Done()
+			}, func(e *js.Object) {
 				// ignore any error
+				wg.Done()
 			})
 		wg.Wait()
 	}
-	if languages := js.Global.Get("navigator").Get("languages"); languages != nil {
+	if languages := nav.Get("languages"); languages != js.Undefined {
 		for i := 0; i < languages.Length(); i++ {
-			if tag, err := language.Parse(languages.Index(i).String()); err == nil {
-				langs = append(langs, tag)
-			}
+			langs = append(langs, languages.Index(i).String())
 		}
 	}
-	if tag, err := language.Parse(js.Global.Get("navigator").Get("language").String()); err == nil {
-		langs = append(langs, tag)
-	}
-	return langs
-}
-
-func fetchTranslations(lang string) ([]byte, error) {
-	resp, err := http.Get(util.BaseURI() + "translations/" + lang + ".all.json")
-	if err != nil {
-		return []byte{}, err
-	}
-	content, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return []byte{}, err
-	}
-	return content, nil
+	langs = append(langs, nav.Get("language").String())
+	return langs, nil
 }
 
 // LocalizePage localizes all language tags on the page.
