@@ -68,7 +68,18 @@ func main() {
 	// This must happen after cordova is initialized
 	langSet := l10n_handler.Init()
 
-	if e := RouterInit(conf.GetString("flashback_app"), conf.GetString("facebook_client_id"), repo, langSet); e != nil {
+	appURL := conf.GetString("flashback_app")
+
+	var prefix string
+	if !cordova.IsMobile() {
+		parsed, err := url.Parse(appURL)
+		if err != nil {
+			panic(err)
+		}
+		prefix = strings.TrimSuffix(parsed.Path, "/")
+	}
+
+	if e := RouterInit(prefix, appURL, conf.GetString("facebook_client_id"), repo, langSet); e != nil {
 		panic(e)
 	}
 
@@ -119,13 +130,8 @@ func resizeContent() {
 	jQuery(".ui-content").SetHeight(strconv.Itoa(screenHt - headerHt - footerHt))
 }
 
-func RouterInit(appURL, facebookID string, repo *model.Repo, langSet *l10n.Set) error {
+func RouterInit(prefix, appURL, facebookID string, repo *model.Repo, langSet *l10n.Set) error {
 	log.Debug("Initializing router\n")
-	parsed, err := url.Parse(appURL)
-	if err != nil {
-		return err
-	}
-	prefix := strings.TrimSuffix(parsed.Path, "/")
 
 	// beforechange -- Just check auth
 	beforeChange := jqeventrouter.NullHandler()
@@ -161,6 +167,8 @@ func getJqmUri(_ *jquery.Event, ui *js.Object) string {
 
 // MobileInit is run after jQuery Mobile's 'mobileinit' event has fired
 func MobileInit() {
+	log.Debugf("MobileInit")
+	defer log.Debugf("MobileInit finished")
 	jQMobile = js.Global.Get("jQuery").Get("mobile")
 
 	// Disable hash features
