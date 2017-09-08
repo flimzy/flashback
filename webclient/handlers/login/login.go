@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/flimzy/go-cordova"
 	"github.com/flimzy/jqeventrouter"
@@ -14,7 +15,6 @@ import (
 	"github.com/gopherjs/gopherjs/js"
 	"github.com/gopherjs/jquery"
 	"github.com/pkg/errors"
-	"honnef.co/go/js/console"
 
 	"github.com/FlashbackSRS/flashback/model"
 )
@@ -22,9 +22,11 @@ import (
 var jQuery = jquery.NewJQuery
 
 // BeforeTransition prepares the logout page before display.
-func BeforeTransition(providers map[string]string) jqeventrouter.HandlerFunc {
+func BeforeTransition(repo *model.Repo, providers map[string]string) jqeventrouter.HandlerFunc {
 	return func(_ *jquery.Event, _ *js.Object, _ url.Values) bool {
-		console.Log("login BEFORE")
+		log.Debug("login BEFORE")
+
+		cancel := checkLoginStatus(repo)
 
 		container := jQuery(":mobile-pagecontainer")
 		for rel, href := range providers {
@@ -32,10 +34,13 @@ func BeforeTransition(providers map[string]string) jqeventrouter.HandlerFunc {
 			li.Show()
 			a := jQuery("a", li)
 			if cordova.IsMobile() {
-				console.Log("Setting on click event")
-				a.On("click", CordovaLogin)
+				a.On("click", func() {
+					cancel()
+					cordovaLogin(repo)()
+				})
 			} else {
 				a.SetAttr("href", href)
+				a.On("click", cancel)
 			}
 		}
 		jQuery(".show-until-load", container).Hide()
@@ -45,23 +50,79 @@ func BeforeTransition(providers map[string]string) jqeventrouter.HandlerFunc {
 	}
 }
 
-func CordovaLogin() bool {
-	console.Log("CordovaLogin()")
-	js.Global.Get("facebookConnectPlugin").Call("login", []string{}, func() {
-		panic("CordovaLogin needs to be made to work")
-		// console.Log("Success logging in")
-		// u, err := repo.CurrentUser()
-		// if err != nil {
-		// 	log.Debugf("No user logged in?? %s\n", err)
-		// } else {
-		// 	// To make sure the DB is initialized as soon as possible
-		// 	u.DB()
-		// }
-	}, func() {
-		console.Log("Failure logging in")
-	})
-	console.Log("Leaving CordovaLogin()")
-	return false
+func checkCtx(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// checkLoginStatus checks for auth in the background
+func checkLoginStatus(repo *model.Repo) func() {
+	log.Debug("checkLoginStatus\n")
+	defer log.Debug("return from checkLoginStatus\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		defer cancel()
+		if cordova.IsMobile() {
+			var wg sync.WaitGroup
+			wg.Add(1)
+			js.Global.Get("facebookConnectPlugin").Call("getLoginStatus", func(response *js.Object) {
+				go func() {
+					defer wg.Done()
+					provider := "facebook"
+					if authResponse := response.Get("authResponse"); authResponse != js.Undefined {
+						token := authResponse.Get("accessToken").String()
+						fmt.Printf("token = %s\n", token)
+						if err := repo.Auth(context.TODO(), provider, token); err != nil {
+							log.Printf("(cls) Auth error: %s", err)
+							return
+						}
+					}
+				}()
+			}, func() {
+				wg.Done()
+			})
+			wg.Wait()
+		}
+		if _, err := repo.CurrentUser(); err != nil {
+			log.Debugf("(cls) repo err: %s", err)
+			return
+		}
+		if e := checkCtx(ctx); e != nil {
+			log.Debugf("(cls) ctx err: %s", e)
+			return
+		}
+
+		log.Debugln("(cls) Already authenticated")
+		js.Global.Get("jQuery").Get("mobile").Call("changePage", "index.html")
+	}()
+	return cancel
+}
+
+func cordovaLogin(repo *model.Repo) func() bool {
+	return func() bool {
+		log.Debug("CordovaLogin()")
+		js.Global.Get("facebookConnectPlugin").Call("login", []string{}, func(response *js.Object) {
+			log.Debug("cl success pre goroutine\n")
+			go func() {
+				provider := "facebook"
+				token := response.Get("authResponse").Get("accessToken").String()
+				if err := repo.Auth(context.TODO(), provider, token); err != nil {
+					displayError(err.Error())
+					return
+				}
+				fmt.Printf("Auth succeeded!\n")
+				js.Global.Get("jQuery").Get("mobile").Call("changePage", "index.html")
+			}()
+		}, func(err *js.Object) {
+			log.Printf("Failure logging in: %s", err.Get("errorMessage").String())
+		})
+		log.Debug("Leaving CordovaLogin()")
+		return true
+	}
 }
 
 func displayError(msg string) {
@@ -100,7 +161,6 @@ func BTCallback(repo *model.Repo, providers map[string]string) jqeventrouter.Han
 			ui.Set("toPage", "index.html")
 			event.StopImmediatePropagation()
 			js.Global.Get("jQuery").Get("mobile").Call("changePage", "index.html")
-			// container.Trigger("pagecontainerbeforechange", ui)
 		}()
 		return true
 	}
